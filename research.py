@@ -10,7 +10,7 @@ import time
 seed = 0  # Random seed number
 start_timesteps = 5e3  # Number of iterations/timesteps before which the model randomly chooses an action, and after which it starts to use the policy network
 eval_freq = 5e3  # How often the evaluation step is performed (after how many timesteps)
-max_timesteps = 6e5 # 5e5  # Total number of iterations/timesteps
+max_timesteps = 6e5  # 5e5  # Total number of iterations/timesteps
 save_models = True  # Boolean checker whether or not to save the pre-trained model
 expl_noise = 0.1  # Exploration noise - STD value of exploration Gaussian noise
 batch_size = 100  # Size of the batch
@@ -32,7 +32,14 @@ if not os.path.exists("./results"):
 if save_models and not os.path.exists("./pytorch_models"):
     os.makedirs("./pytorch_models")
 
-kwargs = {'cash': 1e5, 'unit': 5, 'ratio': 0.07, 'target_profit_factor': 10}
+kwargs = {
+    'cash': 1e5,
+    'unit': 5,
+    'ratio': 0.07,
+    'target_profit_factor': 10,
+    'history_length': 10,
+    'start_step': 110
+}
 env = MarketEnv(**kwargs)
 
 env.seed(seed)
@@ -40,14 +47,21 @@ torch.manual_seed(seed)
 np.random.seed(seed)
 state_dim = env.observation_space.shape[0]
 action_dim = len(env.action_space)
-# env._data = env._data.head(100)
+# env.data = env._data.head(100)
 
 # %%
-env._data.shape
+# env.data.iloc[99:110]#.close.iloc[59:70]
+env.transformed_obs[90:100]
+
+# env.data.iloc[99:110]
+
+
+
 # %%
 
 policy = TD3(state_dim, action_dim)
 replay_buffer = ReplayBuffer()
+
 
 def evaluate_policy(policy, eval_episodes=10):
     avg_reward = 0.
@@ -64,6 +78,7 @@ def evaluate_policy(policy, eval_episodes=10):
     print("---------------------------------------")
     return avg_reward
 
+
 evaluations = [evaluate_policy(policy, 10)]
 total_timesteps = 0
 timesteps_since_eval = 0
@@ -73,19 +88,22 @@ t0 = time.time()
 
 # We start the main loop over 500,000 timesteps
 while total_timesteps < max_timesteps:
-  
+
     # If the episode is done
     if done:
 
         # If we are not at the very beginning, we start the training process of the model
         if total_timesteps != 0:
-            print("Total Timesteps: {} Episode Num: {} Reward: {}".format(total_timesteps, episode_num, episode_reward))
-            policy.train(replay_buffer, episode_timesteps, batch_size, discount, tau, policy_noise, noise_clip, policy_freq)
+            print("Total Timesteps: {} Episode Num: {} Reward: {}".format(
+                total_timesteps, episode_num, episode_reward))
+            policy.train(replay_buffer, episode_timesteps, batch_size,
+                         discount, tau, policy_noise, noise_clip, policy_freq)
 
         # We evaluate the episode and we save the policy
         if timesteps_since_eval >= eval_freq:
             timesteps_since_eval %= eval_freq
-            evaluations.append(evaluate_policy(policy, eval_episodes=eval_episodes))
+            evaluations.append(
+                evaluate_policy(policy, eval_episodes=eval_episodes))
             policy.save(file_name, directory="./pytorch_models")
             np.save("./results/%s" % (file_name), evaluations)
 
@@ -102,8 +120,8 @@ while total_timesteps < max_timesteps:
 
     # Before 10000 timesteps, we play random actions
     if total_timesteps < start_timesteps:
-        action = float(np.random.choice(env.action_space))#.sample()
-    else: # After 10000 timesteps, we switch to the model
+        action = float(np.random.choice(env.action_space))  #.sample()
+    else:  # After 10000 timesteps, we switch to the model
         action = policy.select_action(np.array(obs))
     # If the explore_noise parameter is not 0, we add noise to the action and we clip it
     # if expl_noise != 0:

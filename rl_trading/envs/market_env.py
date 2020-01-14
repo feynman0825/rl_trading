@@ -15,15 +15,6 @@ from sklearn import preprocessing
 logger = logging.getLogger(__name__)
 
 
-def is_valid_action(position, action):
-    '''Check whether action is valid
-    '''
-    if (action == BUY and position == LONG) or \
-        (action == SELL and position == SHORT):
-        return False
-    return True
-
-
 DTYPE = {
     'open': 'int32',
     'close': 'int32',
@@ -47,15 +38,19 @@ class MarketEnv(gym.Env):
     '''
     def __init__(self, *args, **kwargs):
         super(MarketEnv).__init__()
-        self._initial_cash = kwargs['cash']
-        self._unit = kwargs['unit']
-        self._ratio = kwargs['ratio']
+        self.initial_cash = kwargs['cash']
+        self.unit = kwargs['unit']
+        self.ratio = kwargs['ratio']
         self._target_profit_factor = kwargs['target_profit_factor']
-        self.action_space = np.array([HOLD, BUY, SELL])
+        self.history_length = kwargs['history_length']
+        self.start_step = kwargs['start_step']
+        self.action_space = np.array([FLAT, LONG, SHORT])
         self.observation_space = spaces.Box(0, 1, shape=(7,))
-        self._transaction_cost = 15
+        self.transaction_cost = 15
+        self.sigma_target = 1
         self._load_data()
-        self._transformer = FeatureTransformer(self._data)
+        self._transformer = FeatureTransformer(self.data)
+        self.transformed_obs = self._transformer.transform(self.data)
         self.reset()
 
     def reset(self):
@@ -63,15 +58,15 @@ class MarketEnv(gym.Env):
         Returns:
             numpy.array: The initial observation of the space. Initial reward is assumed to be 0.
         """
-        self._current_position = FLAT
-        self._total_pnl = 0.0
-        self._current_cash = self._initial_cash
-        self._current_step = 0
-        self._total_pnl = 0
-        self._current_price = self._data.iloc[0, 3]
-        self._last_price = self._current_price
-        self._current_position_pnl = 0
-        self._last_margin = 0
+        self.current_position = FLAT
+        self.total_pnl = 0.0
+        self.current_cash = self.initial_cash
+        self.current_step = max(0, self.start_step)
+        self.total_pnl = 0
+        self.current_price = self.data.iloc[self.current_step, 3]
+        self.last_price = self.data.iloc[self.current_step-1, 3]
+        self.current_position_pnl = 0
+        self.last_margin = 0
         return self.get_observation()
 
     def _load_data(self, freq='5T'):
@@ -83,18 +78,19 @@ class MarketEnv(gym.Env):
         cu_df.drop(['Unnamed: 0', 'money'], axis=1, inplace=True)
         cu_df = cu_df.set_index('date').resample(freq).agg(AGG_PARAMS).dropna()
         cu_df = cu_df.astype(DTYPE)
-        self._data = cu_df
+        self.data = cu_df
 
     @property
     def total_period(self):
-        return self._data.shape[0]
+        return self.data.shape[0]
+
 
     def step(self, action):
         """Run one timestep of the environment's dynamics.
         Accepts an action and returns a tuple (observation, reward, done, info).
 
         Args:
-            action (int): 0 - hold, 1 - buy, 2 - sell
+            action (int): FLAT, LONG, SHORT
         Returns:
             tuple:
                 - observation (numpy.array): Agent's observation of the current environment.
@@ -104,77 +100,79 @@ class MarketEnv(gym.Env):
                 - info (str): Contains auxiliary diagnostic information
                               (helpful for debugging, and sometimes learning).
         """
-        assert action in self.action_space, "Action should be either 0,1 or 2"
+        assert action in self.action_space, "Action should be either 0,-1 or 1"
         logger.info('Agent at time step of %d takes %s action' %
-                    (self._current_step, action))
-
-        # check action
+                    (self.current_step, action))
 
         # main logic
-        current_position = self._current_position
+        current_position = self.current_position
         pnl = 0.0
         reward = 0
 
-        # Make sure action is valid
-        if not is_valid_action(current_position, action):
-            action = HOLD
-            reward += -1
+        diff_price = self.current_price - self.last_price
+        pnl = self.unit * diff_price * current_position
+        self.current_position_pnl += pnl
 
-        diff_price = self._current_price - self._last_price
-        pnl = self._unit * diff_price * current_position
-        self._current_position_pnl += pnl
-        if action in (BUY, SELL):
-            if self._current_position == FLAT:
-                pnl -= self._transaction_cost
-                self._current_position_pnl -= self._transaction_cost
-                self._last_margin = self._unit * self._current_price * self._ratio
-                # update cash
-                self._current_cash -= self._last_margin + self._transaction_cost
-            else:
-                # close position
-                self._current_cash += self._last_margin + self._current_position_pnl
-                self._current_cash += +self._transaction_cost  # correct for double substract
-                self._last_margin = 0
-                self._current_position_pnl = 0
+        if self.current_position == FLAT and action in (LONG, SHORT):
+            # open new position
+            pnl -= self.transaction_cost
+            self.current_position_pnl -= self.transaction_cost
+            self.last_margin = self.unit * self.current_price * self.ratio
+            self.current_cash -= self.last_margin + self.transaction_cost
+        elif action == FLAT and self.current_position in (LONG, SHORT):
+            # close position
+            self.current_cash += self.last_margin + self.current_position_pnl
+            self.current_cash += self.transaction_cost  # correct for double substract
+            self.last_margin = 0
+            self.current_position_pnl = 0
+        elif (action == LONG and self.current_position == SHORT) or (action == SHORT and self.current_position == LONG):
+            # close position
+            self.current_cash += self.last_margin + self.current_position_pnl
+            self.current_cash += self.transaction_cost  # correct for double substract
+            # then open new position
+            pnl -= self.transaction_cost
+            self.current_position_pnl = -self.transaction_cost
+            self.last_margin = self.unit * self.current_price * self.ratio
+            self.current_cash -= self.last_margin + self.transaction_cost
 
-        self._total_pnl += pnl
+
+        self.total_pnl += pnl
 
         # update reward
-        if pnl == 0:
-            reward += 0
-        elif pnl > self._target_profit_factor * self._transaction_cost:
-            reward += 1
-        elif pnl > 0:
-            reward += 0.1
-        elif pnl < -self._target_profit_factor * self._transaction_cost:
-            reward += -1
-        else:
-            reward += -0.1
+        reward = self.get_reward(action)
 
         # update position
-        self._current_position = STATE_MATHINE[(current_position, action)]
+        self.current_position = action #STATE_MATHINE[(current_position, action)]
 
         # increment time step
-        self._current_step += 1
+        self.current_step += 1
 
         # update price track
-        self._last_price = self._current_price
-        self._current_price = self._data.iloc[self._current_step, 3]
+        self.last_price = self.current_price
+        self.current_price = self.data.iloc[self.current_step, 3]
 
         observation = self.get_observation()
-        done = self._is_trading_done()
+        done = self.is_trading_done()
         info = {}  # modify later
 
         return observation, reward, done, info
 
-    def _is_trading_done(self) -> bool:
+    def get_reward(self, action):
+        # mu = 1 #  a fixed number per contract at each trade
+        #reward = mu * sigma_target * (action/sigma*r - bp * price * abs(action/sigma-prev_action/prev_sigma))
+        sigma = self.data.close.iloc[self.current_step-60:self.current_step].std()
+        price_change = self.current_price - self.last_price
+        reward = self.sigma_target * (action/sigma*price_change - self.transaction_cost)
+        return reward
+
+    def is_trading_done(self) -> bool:
         done = False
         # check whether account goes broke
-        minimal_margin = self._current_price * self._unit * self._ratio
-        if self._current_cash <= minimal_margin:
+        minimal_margin = self.current_price * self.unit * self.ratio
+        if self.current_cash <= minimal_margin:
             done = True
         # check whether simulation is done
-        if self._current_step >= self.total_period - 1:
+        if self.current_step >= self.total_period - 1:
             done = True
         return done
 
@@ -186,17 +184,9 @@ class MarketEnv(gym.Env):
         Returns:
             numpy.array: Return the concatenated matrix, which is (time_step, features+1)
         """
-        # time_step = self._curr_time_step
-        # history_length = self._history_length
-        # assert time_step >= history_length, 'Time step should be greater than history_length %d' % self._history_length
-        # asset_matrix = self._matrix.iloc[(time_step -
-        #                                   history_length):time_step].values
-        # position_matrix = np.array(
-        #     self._position_history)[(time_step -
-        #                              history_length):time_step].reshape(-1, 1)
-        # observation = np.concatenate((asset_matrix, position_matrix), axis=1)
-        transformed_obs = self._transformer.transform(self._data.iloc[self._current_step])
-        observation = np.array(transformed_obs.tolist()[0] + [self._current_position])
+        # transformed_obs = self._transformer.transform(self.data.iloc[self.current_step-self.history_length:self.current_step])
+
+        observation = (self.transformed_obs[self.current_step-self.history_length:self.current_step, :], self.current_position)
         return observation
 
     def _render(self, mode='human'):
@@ -209,5 +199,5 @@ class FeatureTransformer:
         self.scaler = preprocessing.MinMaxScaler()
         self.scaler.fit(X)
 
-    def transform(self, new_data):
-        return self.scaler.transform(new_data.to_frame().T)
+    def transform(self, data):
+        return self.scaler.transform(data) # .to_frame().T
