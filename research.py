@@ -6,6 +6,7 @@ import numpy as np
 from sklearn import preprocessing
 from rl_trading.agent.td3 import TD3, ReplayBuffer
 import time
+import pandas_ta as ta
 
 seed = 0  # Random seed number
 start_timesteps = 5e3  # Number of iterations/timesteps before which the model randomly chooses an action, and after which it starts to use the policy network
@@ -38,25 +39,21 @@ kwargs = {
     'ratio': 0.07,
     'target_profit_factor': 10,
     'history_length': 10,
-    'start_step': 110
+    'start_step': 1000
 }
 env = MarketEnv(**kwargs)
 
 env.seed(seed)
 torch.manual_seed(seed)
 np.random.seed(seed)
-state_dim = env.observation_space.shape[0]
-action_dim = len(env.action_space)
-# env.data = env._data.head(100)
 
 # %%
-# env.data.iloc[99:110]#.close.iloc[59:70]
-env.transformed_obs[90:100]
-
-# env.data.iloc[99:110]
-
+# env.features.shape
+# (ta.sma(self.close, 30) - ta.sma(self.close, 60)) / ta.stdev(self.close, 60)
+env.features
 
 
+# pd.concat([normalized_rsi.to_numpy(), normalized_rsi], axis=1).head()
 # %%
 
 policy = TD3(state_dim, action_dim)
@@ -79,7 +76,7 @@ def evaluate_policy(policy, eval_episodes=10):
     return avg_reward
 
 
-evaluations = [evaluate_policy(policy, 10)]
+evaluations = [evaluate_policy(policy, eval_episodes)]
 total_timesteps = 0
 timesteps_since_eval = 0
 episode_num = 0

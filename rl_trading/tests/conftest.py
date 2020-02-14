@@ -6,7 +6,6 @@ def market_env():
     kwargs = {'cash': 1e5,
               'unit': 5,
               'ratio': 0.07,
-              'target_profit_factor': 10,
               'history_length': 10,
               'start_step': 100}
     env = MarketEnv(**kwargs)

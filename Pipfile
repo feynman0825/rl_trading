@@ -19,6 +19,10 @@ matplotlib = "*"
 torch = "*"
 gym = "*"
 scikit-learn = "*"
+pandas-ta = "*"
+tqdm = "*"
+tensorboardx = "*"
+tensorflow = "*"
 
 [requires]
 python_version = "3.7.1"
