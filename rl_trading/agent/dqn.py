@@ -110,10 +110,10 @@ class DQNAgent:
             self.save_reward(reward)
 
         #if self.update_count % 10 == 0:
-        moving_loss = np.mean(self.losses[-100:])
-        print(
-            f'At {self.update_count}, loss is: {moving_loss}'
-        )
+        #moving_loss = np.mean(self.losses[-100:])
+        # print(
+        #     f'At {self.update_count}, loss is: {moving_loss}'
+        # )
 
     def compute_loss(self, state, action, next_action, reward, next_state, done):
         gamma = self.gamma
