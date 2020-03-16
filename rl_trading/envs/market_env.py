@@ -44,6 +44,8 @@ class MarketEnv(gym.Env):
         self.ratio = kwargs['ratio']
         self.history_length = kwargs['history_length']
         self.start_step = kwargs['start_step']
+        self.trading_period = kwargs['trading_period']
+        self.random_start = kwargs['random_start']
         self.transaction_cost = 15
         self.sigma_target = 1
         self.load_data()
@@ -67,7 +69,10 @@ class MarketEnv(gym.Env):
         self.second_last_action = FLAT
         self.total_pnl = 0.0
         self.current_cash = self.initial_cash
-        self.current_step = max(0, self.start_step)
+        if self.random_start:
+            self.current_step = np.random.randint(self.start_step, 200000)
+        else:
+            self.current_step = self.start_step
         self.total_pnl = 0
         self.current_price = self.data.iloc[self.current_step, 3]
         self.last_price = self.data.iloc[self.current_step - 1, 3]
@@ -184,15 +189,17 @@ class MarketEnv(gym.Env):
         return reward
 
     def is_trading_done(self) -> bool:
-        done = False
+        if self.trading_period is not None:
+            if self.current_step >= self.start_step + self.trading_period:
+                return True
         # check whether account goes broke
         minimal_margin = self.current_price * self.unit * self.ratio
         if self.current_cash <= minimal_margin:
-            done = True
+            return True
         # check whether simulation is done
         if self.current_step >= self.total_period - 1:
-            done = True
-        return done
+            return True
+        return False
 
     def get_observation(self) -> np.array:
         """Get the observation matrix
